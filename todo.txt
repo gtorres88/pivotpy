@@ -1,0 +1,5 @@
+- Display project phases and percentage completion
+- Display project phase percentage completion expected in iteration
+- Display number of points assigned to user in iteration
+- Display average capacity of user
+
