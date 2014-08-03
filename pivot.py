@@ -4,6 +4,9 @@ TOKEN = ""
 URL = ""
 PROJECT_IDS = ""
 
+
+_projects_ = {}
+
 def init(token, url, project_ids):
     global TOKEN
     global URL
@@ -22,7 +25,11 @@ class Project(object):
         self.name = name
         self.epics = []
         self.stories = []
-        self.labels = []
+        self.labels = {}
+
+        global _projects_
+
+        _projects_[int(self.project_id)] = self
 
     @staticmethod
     def from_json(json):
@@ -32,16 +39,20 @@ class Project(object):
     @staticmethod
     def from_id(project_id):
         """Gets a project given a project ID"""
-        resp = requests.get(URL+'/projects/%s?fields=name,id' % (str(project_id)), headers={'X-TrackerToken' : TOKEN})
+        resp = requests.get(URL+'/projects/%s?fields=name,id,epics,labels' % (str(project_id)), headers={'X-TrackerToken' : TOKEN})
         jresp = resp.json()
+
         ret = Project(int(jresp['id']), jresp['name'])
 
-        # get epics
-        #if ('epic_ids' in jresp.keys()):
-        #    for ids in jresp['epic_ids']:
-        #        ret.epics.append(Epic.from_id(project_id, int(ids)))
+        #get labels
+        for lab in jresp['labels']:
+            ret.labels[int(lab['id'])] = lab['name']
 
-        # get labels
+        # get epics
+        if ('epics' in jresp.keys()):
+            for epic in jresp['epics']:
+                ret.epics.append(Epic.from_json(epic))
+
 
         # get stories
         resp = requests.get(URL+'/projects/%s/stories' % (str(project_id)),
@@ -57,36 +68,31 @@ class Project(object):
         return ret
 
 
-class Label(object):
-    """Object representation of a label"""
-
-    def __init__(self, label_id = None, label_name= "", project_id = None):
-        self.label_name = label_name
-        self.label_id = label_id
-        self.project_id = project_id
-
-
-    @staticmethod
-    def from_json(json):
-        """Creates a label from a json dict"""
-        return Label(label_id = json['id'], label_name = json['name'],
-                project_id = json['project_id'])
-
-
 class Epic(object):
     """Object representation of an epic"""
 
-    def __init___(self, epic_id = None, epic_label = None, project_id = None):
-        self.stories = None
+    def __init__(self, epic_id = None, name = "", epic_label = "", project_id = None):
+        self.stories = []
         self.label = epic_label
+        self.label_id = 0
         self.epic_id = epic_id
         self.project_id = project_id
+        self.name = name
 
 
     @staticmethod
     def from_json(json):
         """Creates an epic from a json dict"""
-        return Epic(epic_id = int(json['id']), project_id = int(json['project_id']))
+
+        ret = Epic(epic_id = int(json['id']), name = json['name'], project_id =
+                int(json['project_id']))
+
+        if 'label' in json.keys():
+            ret.label = json['label']['name']
+            ret.label_id = int(json['label']['id'])
+
+
+        return ret
 
     @staticmethod
     def from_id(project_id, epic_id):
@@ -101,7 +107,7 @@ class Story(object):
     def __init__(self,name = "", description = "", story_type = None, story_id
             = None, project_id = None, estimate = 0, state = None):
         self.story_id = story_id
-        self.labels = []
+        self.labels = {} #this is just a dictionary of labels - id to name
         self.project_id = project_id
         self.estimate = estimate
         self.name = name
@@ -113,20 +119,15 @@ class Story(object):
     def from_json(json):
         """converts a json string into a a story object"""
 
-        desc = ''
-        est = None
-        if 'description' in json.keys():
-            desc = json['description']
-        if 'estimate' in json.keys():
-            est = int(json['estimate'])
-        ret = Story(name = json['name'], description = desc, 
-                story_type = json['story_type'], story_id = json['id'],
-                project_id = json['project_id'], estimate = est,
-                state = json['current_state'])
+        ret = Story()
 
+        for key in json.keys():
+            setattr(ret, key, json[key])
+
+        ret.labels = {}
         if 'labels' in json.keys():
-            for label in json['labels']:
-                ret.labels.append(Label.from_json(label))
+            for lab in json['labels']:
+                ret.labels[int(lab['id'])] = lab['name']
 
         return ret
 
