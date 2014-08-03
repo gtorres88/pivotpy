@@ -6,6 +6,7 @@ PROJECT_IDS = ""
 
 
 _projects_ = {}
+_users_ = {}
 
 def init(token, url, project_ids):
     global TOKEN
@@ -71,7 +72,7 @@ class Project(object):
         limit = 0
 
         while True:
-            resp = requests.get(URL+'/projects/%s/stories?offset=%s&envelope=true'
+            resp = requests.get(URL+'/projects/%s/stories?fields=:default,owner_ids&offset=%s&envelope=true'
                     % (str(project_id), str(offset)),
                     headers={'X-TrackerToken' : TOKEN})
             jresp = resp.json()
@@ -130,29 +131,29 @@ class Epic(object):
         self.epic_id = epic_id
         self.project_id = project_id
         self.name = name
+        self.epic_stories = []
 
-    def _get_epic_stories(self):
+    def update_epic_stories(self):
 
         global _projects_
         #get the project for this epic:
         proj = _projects_[int(self.project_id)]
 
         #then we check the stories for this project that belong to this epic
-        epic_stories = []
         for s in proj.stories:
             if s.has_label(self.label):
-                epic_stories.append(s)
+                self.epic_stories.append(s)
 
-        return epic_stories
 
     def get_total_points(self):
         """gets an epic's total of points"""
 
         points = 0
 
-        epic_stories = self._get_epic_stories()
+        if (len(self.epic_stories) == 0):
+            self.update_epic_stories()
 
-        for s in epic_stories:
+        for s in self.epic_stories:
             if hasattr(s, 'estimate'):
                 points += int(s.estimate)
 
@@ -161,13 +162,26 @@ class Epic(object):
     def get_completed_points(self):
         points = 0
 
-        epic_stories = self._get_epic_stories()
+        if (len(self.epic_stories) == 0):
+            self.update_epic_stories()
 
-        for s in epic_stories:
+        for s in self.epic_stories:
             if hasattr(s, 'estimate') and (s.current_state == 'accepted'):
                 points += int(s.estimate)
 
         return points
+
+    def filter_stories(self, stories):
+        """filters list of stories and returns a new list for stories just
+        belonging to this epic"""
+
+        epic_stories = []
+
+        for s in stories:
+            if s.has_label(self.label):
+                epic_stories.append(s)
+
+        return epic_stories
 
     @staticmethod
     def from_json(json):
@@ -236,9 +250,43 @@ class Story(object):
 class User(object):
     """Object represenation of a user"""
 
-    def __init__(self, user_id, user_name):
-        self.user_id = user_id
-        self.name = user_name
+    def __init__(self, user_id):
+        self.id = user_id
+
+        _users_[self.id] = self
+        return
+
+    def filter_stories_owned(self, stories):
+        """returns a new list of filtered stories owned by this user"""
+
+        user_stories = []
+        for s in stories:
+            if self.id in s.owner_ids:
+                user_stories.append(s)
+
+        return user_stories
+
+    def filter_stories_requested(self, stories):
+        """ returns a new list of filtered stories requested by this user"""
+        
+        user_stories = []
+        for s in stories:
+            if self.id == stories.requested_by_id:
+                user_stories.append(s)
+
+        return user_stories
+
+
+    @staticmethod
+    def from_json(json):
+        """returns a new user from a json dict"""
+
+        ret = User(int(json['id']))
+
+        for key in json.keys():
+            setattr(ret, key, json[key])
+
+        return ret
 
 class Iteration(object):
     """Object representation of an iteration"""
@@ -250,6 +298,7 @@ class Iteration(object):
         self.start = start
         self.finish = finish
         self.strength = strength
+        self.iter_stories = []
 
     def has_story(self, story):
         """checks if story is in iteration, takes a Story object or a story_id"""
@@ -263,6 +312,28 @@ class Iteration(object):
 
         return False
 
+    def filter_stories(self, stories):
+        """filters list of stories and returns a new list for stories just
+        belonging to this iteration"""
+
+        iter_stories = []
+        for story in stories:
+            if int(story.id) in self.story_ids:
+                iter_stories.append(story)
+
+        return iter_stories
+
+
+    def update_iteration_stories(self):
+        global _projects_
+
+        #get the project for this epic:
+        proj = _projects_[int(self.project_id)]
+
+        for story in proj.stories:
+            if int(story.id) in self.story_ids:
+                self.iter_stories.append(story)
+
     @staticmethod
     def from_json(json):
         ret = Iteration()
@@ -271,6 +342,16 @@ class Iteration(object):
             setattr(ret, key, json[key])
 
         return ret
+
+#calculates the total points in given list
+def get_story_totals(stories):
+    points = 0
+
+    for s in stories:
+        if hasattr(s, 'estimate'):
+            points += int(s.estimate)
+
+    return points
 
 
 def get_projects(TOKEN):
@@ -285,3 +366,16 @@ def get_projects(TOKEN):
         project_list.append(Project.from_id(i))
 
     return project_list
+
+def get_users(acctid):
+
+    user_list = []
+    resp = requests.get(URL+'/accounts/%s/memberships' %(str(acctid)), headers={'X-TrackerToken' : TOKEN})
+    jresp = resp.json()
+
+    for entry in jresp:
+        user_list.append(User.from_json(entry['person']))
+
+    return user_list
+
+

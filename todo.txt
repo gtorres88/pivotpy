@@ -1,5 +1,6 @@
-- Display project phases and percentage completion
-- Display project phase percentage completion expected in iteration
-- Display number of points assigned to user in iteration
-- Display average capacity of user
+- Display project phases and percentage completion - DONE
+- Display project phase percentage completion expected in iteration -
+  DONE
+- Display number of points assigned to user in iteration - DONE
+- Display average capacity of user - TODO
 
