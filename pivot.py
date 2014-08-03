@@ -25,11 +25,22 @@ class Project(object):
         self.name = name
         self.epics = []
         self.stories = []
+        self.done_iterations = []
+        self.current_backlog_iterations = []
         self.labels = {}
 
         global _projects_
 
         _projects_[int(self.project_id)] = self
+
+    def get_current_iteration(self):
+        """returns current iteration"""
+
+        if len(self.current_backlog_iterations) > 0:
+            return self.current_backlog_iterations[0]
+
+        #should probably raise an exception here
+        return None
 
     @staticmethod
     def from_json(json):
@@ -55,15 +66,56 @@ class Project(object):
 
 
         # get stories
-        resp = requests.get(URL+'/projects/%s/stories' % (str(project_id)),
-                headers={'X-TrackerToken' : TOKEN})
-        jresp = resp.json()
+        offset = 0
+        total = 0
+        limit = 0
 
-        for story in jresp:
-            ret.stories.append(Story.from_json(story))
+        while True:
+            resp = requests.get(URL+'/projects/%s/stories?offset=%s&envelope=true'
+                    % (str(project_id), str(offset)),
+                    headers={'X-TrackerToken' : TOKEN})
+            jresp = resp.json()
+
+            total = int(jresp['pagination']['total'])
+            limit = int(jresp['pagination']['limit'])
+
+            for story in jresp['data']:
+                ret.stories.append(Story.from_json(story))
+
+            offset = offset + limit
+            if (offset >= total):
+                break
 
         # get iterations
+        def get_iteration_list(scope):
+            offset = 0
+            total = 0
+            limit = 0
 
+            to_return = [] #list of iterations
+
+            while True:
+                resp = requests.get(URL+'/projects/%s/iterations?fields=number,project_id,length,team_strength,story_ids,start,finish&offset=%s&scope=%s&envelope=true'
+                        % (str(project_id),str(offset), str(scope)),
+                        headers={'X-TrackerToken' : TOKEN})
+                jresp = resp.json()
+
+
+                total = int(jresp['pagination']['total'])
+                limit = int(jresp['pagination']['limit'])
+
+                for iteration in jresp['data']:
+                    to_return.append(Iteration.from_json(iteration))
+
+                offset = offset + limit
+                if (offset >= total):
+                    break
+
+            return to_return
+
+        #this gets the done iterations
+        ret.done_iterations = get_iteration_list("done")
+        ret.current_backlog_iterations = get_iteration_list("current_backlog")
 
         return ret
 
@@ -79,6 +131,43 @@ class Epic(object):
         self.project_id = project_id
         self.name = name
 
+    def _get_epic_stories(self):
+
+        global _projects_
+        #get the project for this epic:
+        proj = _projects_[int(self.project_id)]
+
+        #then we check the stories for this project that belong to this epic
+        epic_stories = []
+        for s in proj.stories:
+            if s.has_label(self.label):
+                epic_stories.append(s)
+
+        return epic_stories
+
+    def get_total_points(self):
+        """gets an epic's total of points"""
+
+        points = 0
+
+        epic_stories = self._get_epic_stories()
+
+        for s in epic_stories:
+            if hasattr(s, 'estimate'):
+                points += int(s.estimate)
+
+        return points
+
+    def get_completed_points(self):
+        points = 0
+
+        epic_stories = self._get_epic_stories()
+
+        for s in epic_stories:
+            if hasattr(s, 'estimate') and (s.current_state == 'accepted'):
+                points += int(s.estimate)
+
+        return points
 
     @staticmethod
     def from_json(json):
@@ -115,6 +204,17 @@ class Story(object):
         self.story_type = story_type
         self.state = state
 
+
+    def has_label(self, label_name = None, label_id = None):
+        """checks if has a particular label, by name or ID. ID is first if provided"""
+
+        if label_id is not None:
+            return (label_id in self.labels.keys())
+        elif label_name is not None:
+            return (label_name in self.labels.values())
+        else:
+            return False
+
     @staticmethod
     def from_json(json):
         """converts a json string into a a story object"""
@@ -150,6 +250,28 @@ class Iteration(object):
         self.start = start
         self.finish = finish
         self.strength = strength
+
+    def has_story(self, story):
+        """checks if story is in iteration, takes a Story object or a story_id"""
+        if isinstance(story, Story):
+            story_id = int(story.id)
+        else:
+            story_id = int(story)
+
+        if story_id in self.story_ids:
+            return True
+
+        return False
+
+    @staticmethod
+    def from_json(json):
+        ret = Iteration()
+
+        for key in json.keys():
+            setattr(ret, key, json[key])
+
+        return ret
+
 
 def get_projects(TOKEN):
     project_list = []
